@@ -4,7 +4,14 @@
 \alias{cxsurvival}
 \title{Kaplan-Meier survival plot with CanvasXpress}
 \usage{
-cxsurvival(object, time = "time", status = "status", group = NULL, ...)
+cxsurvival(
+  object,
+  time = "time",
+  status = "status",
+  group = NULL,
+  tooltip = NULL,
+  ...
+)
 }
 \arguments{
 \item{object}{A `SummarizedExperiment` (its `colData` is used) or a
@@ -15,6 +22,11 @@ status (`1`/`TRUE` = event, `0`/`FALSE` = censored).}
 
 \item{group}{Optional column name used to stratify and colour the curves
 (for example a treatment arm or cohort). `NULL` draws a single curve.}
+
+\item{tooltip}{Optional character vector of extra `colData` column names to
+carry with each subject, so hovering a step or a censored observation
+shows that subject's metadata (for example age, sex or disease stage).
+`NULL` (the default) carries only the grouping column.}
 
 \item{...}{Additional CanvasXpress configuration passed to
 [canvasXpress::canvasXpress()].}

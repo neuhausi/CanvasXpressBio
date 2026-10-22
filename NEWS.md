@@ -1,3 +1,20 @@
+# CanvasXpressBio 0.99.5
+
+* New `makeDemoSE()` builds the vignette's demonstration `SummarizedExperiment`
+  in one call, carrying the derived differential-expression table and the
+  per-cohort paired t-test p-values in its `metadata()`, so the vignette no
+  longer constructs data inline.
+* New `makeBeeswarmDemo()` returns a dense single-feature object for showing a
+  sina / beeswarm overlay at scale.
+* `cxboxplot()` gains `points` (`"all"`, `"sina"`, `"jitter"`, `"none"`) to pack
+  the observations into a beeswarm that stays legible with many points.
+* `cxsurvival()` gains `tooltip` to carry extra `colData` columns, so hovering a
+  step or a censored observation shows that subject's metadata.
+* Vignette: build the dataset with `makeDemoSE()`; document the enriched cell
+  hover and the view-reset control on the heatmap; surface per-subject metadata,
+  the censored-observation rug and the risk table on the Kaplan-Meier curve; and
+  add a beeswarm-at-scale example.
+
 # CanvasXpressBio 0.99.4
 
 * Fix `cxvolcano()`: the result matrix was transposed, so every gene collapsed

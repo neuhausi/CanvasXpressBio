@@ -68,69 +68,18 @@ The rest of this vignette demonstrates these four views on a single object.
 The study follows 24 patients in two cohorts, each measured at baseline and at
 week 12, over a panel of twelve marker genes. The `colData` records the cohort,
 the time point, the subject, a follow-up time with an event indicator, and
-whether that subject's biomarker went up or down.
+whether that subject's biomarker went up or down; the `rowData` records whether
+each gene is an up- or down-regulated marker.
+
+To keep the figures below uncluttered, the data construction lives in a single
+helper, `makeDemoSE()`, so the vignette builds the whole object with one call.
+The derived pieces the other figures need — a differential-expression table for
+the volcano and the per-cohort paired t-test p-values for the boxplot — travel
+with the object in its `metadata()`. (See `?makeDemoSE` for exactly how the
+object is assembled.)
 
 ```{r dataset}
-set.seed(1)
-
-up_genes   <- c("IL6", "CXCL8", "MMP9", "TNF", "CCL2", "VEGFA")
-down_genes <- c("ALB", "CDH1", "FOXO1", "PPARG", "ADIPOQ", "LEP")
-genes      <- c(up_genes, down_genes)
-
-patients   <- c(sprintf("PA%02d", 1:12), sprintf("PB%02d", 1:12))
-cohort     <- rep(c("Cohort A", "Cohort B"), each = 12)
-names(cohort) <- patients
-
-# Sample table: each patient measured at Baseline and Week 12.
-coldata <- data.frame(
-    Patient   = rep(patients, each = 2),
-    Condition = rep(c("Baseline", "Week 12"), times = length(patients)),
-    stringsAsFactors = FALSE)
-coldata$Cohort <- cohort[coldata$Patient]
-rownames(coldata) <- paste(coldata$Patient,
-    ifelse(coldata$Condition == "Baseline", "BL", "W12"),
-    sep = "_")
-
-# Expression: baseline around 8; at week 12 the up genes rise and the down
-# genes fall. Cohort A responds consistently; cohort B is heterogeneous — some
-# patients respond, a few reverse — so the biomarker moves both ways there.
-baseline <- matrix(rnorm(length(genes) * length(patients), 8, 0.8),
-    nrow = length(genes), dimnames = list(genes, patients))
-effect   <- ifelse(genes %in% up_genes, 1.6, -1.6)
-strength <- setNames(rep(1.0, length(patients)), patients)
-strength[cohort == "Cohort B"] <-
-    runif(sum(cohort == "Cohort B"), -0.7, 0.8)
-
-expr <- matrix(0, nrow = length(genes), ncol = nrow(coldata),
-    dimnames = list(genes, rownames(coldata)))
-for (j in seq_len(nrow(coldata))) {
-    p <- coldata$Patient[j]
-    delta <- if (coldata$Condition[j] == "Week 12")
-        effect * strength[[p]] + rnorm(length(genes), 0, 0.4) else 0
-    expr[, j] <- baseline[, p] + delta
-}
-
-# Per-patient survival (cohort A does better) and the direction of the ALB
-# change from baseline to week 12 (ALB is the biomarker shown in the boxplot).
-alb_bl  <- expr["ALB", coldata$Condition == "Baseline"]
-alb_w12 <- expr["ALB", coldata$Condition == "Week 12"]
-updown  <- ifelse(alb_w12 >= alb_bl, "up", "down")
-surv_time <- round(ifelse(cohort == "Cohort A",
-    rexp(length(patients), 1 / 28),
-    rexp(length(patients), 1 / 16)) + 2)
-surv_status <- rbinom(length(patients), 1,
-    ifelse(cohort == "Cohort A", .5, .75))
-
-coldata$Time   <- surv_time[match(coldata$Patient, patients)]
-coldata$Status <- surv_status[match(coldata$Patient, patients)]
-coldata$updown <- updown[match(coldata$Patient, patients)]
-
-se <- SummarizedExperiment(
-    assays  = list(expr = expr),
-    colData = S4Vectors::DataFrame(coldata),
-    rowData = S4Vectors::DataFrame(
-        Direction = ifelse(genes %in% up_genes, "Up", "Down"),
-        row.names = genes))
+se <- makeDemoSE()
 se
 ```
 
@@ -149,6 +98,18 @@ cxplot(se, title = "Marker-gene expression",
     cluster = TRUE)
 ```
 
+**Enriching the hover metadata.** The annotations are not only drawn as the
+coloured tracks beside the map — they also travel into every cell's tooltip.
+Hovering a cell shows its expression value together with the gene and sample it
+belongs to and the `colData` / `rowData` fields listed in `overlays` /
+`var_overlays` (here the cohort, time point and gene direction). To surface more
+metadata on hover, a user simply adds more columns to the object's `colData` or
+`rowData` and names them in `overlays` / `var_overlays` — no extra wiring.
+
+**Resetting the view.** After zooming (mouse wheel) or a two-finger pinch, the
+toolbar's reset button — and a double-click anywhere on the plot — restores the
+original view, the same role Plotly's *home* control plays.
+
 Because `SingleCellExperiment` and `DESeqDataSet` both extend
 `SummarizedExperiment`, the same method renders them without any extra code.
 
@@ -157,25 +118,14 @@ Because `SingleCellExperiment` and `DESeqDataSet` both extend
 `cxvolcano()` accepts any result table with a log-fold-change and a p-value
 column — a `DESeq2::results()` object, a `limma::topTable()` data frame, or a
 plain data frame. Here week 12 is contrasted against baseline; the twelve marker
-genes from the heatmap are the labelled hits.
+genes from the heatmap are the labelled hits. The result table (the twelve
+markers among a genome-wide background) was computed in `makeDemoSE()` and rides
+along in the object's `metadata()`.
 
 ```{r volcano}
-# Observed effect for the twelve markers, placed among a genome-wide background.
-marker_fc <- rowMeans(expr[, coldata$Condition == "Week 12"]) -
-    rowMeans(expr[, coldata$Condition == "Baseline"])
-marker_p  <- 10^(-abs(marker_fc) * runif(length(genes), 2.5, 3.5))
-
-n_bg   <- 1988
-bg_fc  <- rnorm(n_bg, 0, 0.45)
-bg_p   <- pmin(10^(-(abs(bg_fc) * runif(n_bg, 1.0, 3.0))), 1)
-
-res <- data.frame(
-    log2FoldChange = c(marker_fc, bg_fc),
-    padj           = c(marker_p, bg_p),
-    row.names      = c(genes, paste0("bg", seq_len(n_bg))))
-
+res <- S4Vectors::metadata(se)$deResults
 cxvolcano(res, title = "Week 12 vs baseline",
-    label_genes = genes)
+    label_genes = rownames(se))
 ```
 
 # A Kaplan-Meier survival curve
@@ -184,9 +134,18 @@ cxvolcano(res, title = "Week 12 vs baseline",
 `colData`. Using the baseline rows gives one record per patient, stratified by
 cohort.
 
+The curve is interactive, and the interactivity carries the per-subject
+information: `tooltip` names extra `colData` columns to attach to each subject,
+so hovering a step or a censored observation shows *that patient's* metadata.
+Censored observations are drawn as crosshair marks on the curve and, with
+`kmCensoredRug = TRUE`, as a rug along the time axis; the risk table ("Subjects
+at Risk") and the log-rank p-value are shown as well.
+
 ```{r km}
 baseline_se <- se[, se$Condition == "Baseline"]
 cxsurvival(baseline_se, time = "Time", status = "Status", group = "Cohort",
+    tooltip = c("Patient", "updown"),
+    kmCensoredRug = TRUE, kmPvalue = TRUE,
     title = "Survival by cohort")
 ```
 
@@ -196,14 +155,13 @@ cxsurvival(baseline_se, time = "Time", status = "Status", group = "Cohort",
 points, and joins the repeated measures with a line coloured by the direction of
 change — faceted by cohort.
 
+The per-cohort paired t-test p-values were computed in `makeDemoSE()` and read
+back from `metadata()` to label each panel.
+
 ```{r boxplot}
-# Paired t-test per cohort, shown as a label in each panel.
-pA <- t.test(alb_w12[cohort == "Cohort A"], alb_bl[cohort == "Cohort A"],
-    paired = TRUE)$p.value
-pB <- t.test(alb_w12[cohort == "Cohort B"], alb_bl[cohort == "Cohort B"],
-    paired = TRUE)$p.value
-ptext <- function(p) if (p < 1e-4) "p<0.0001" else sprintf("p=%.3g", p)
-ytop <- max(expr["ALB", ]) + 0.3
+paired <- S4Vectors::metadata(se)$albPaired
+ptext  <- function(p) if (p < 1e-4) "p<0.0001" else sprintf("p=%.3g", p)
+ytop   <- max(assay(se)["ALB", ]) + 0.3
 
 cxboxplot(se, feature = "ALB", group = "Condition", segregate = "Cohort",
     connect = "Patient", color = "updown",
@@ -212,10 +170,26 @@ cxboxplot(se, feature = "ALB", group = "Condition", segregate = "Cohort",
         up = "rgb(224,130,20)",
         down = "rgb(58,102,160)")),
     decorations = list(text = list(
-        list(value = ytop, label = ptext(pA), panel = 1,
+        list(value = ytop, label = ptext(paired[["Cohort A"]]), panel = 1,
             smpCenter = TRUE, preTransformed = TRUE),
-        list(value = ytop, label = ptext(pB), panel = 2,
+        list(value = ytop, label = ptext(paired[["Cohort B"]]), panel = 2,
             smpCenter = TRUE, preTransformed = TRUE))))
+```
+
+## Beeswarm overlays at scale
+
+The paired boxplot above draws every observation because the design is small.
+When a group holds many points, the `points` argument switches the overlay to a
+sina / beeswarm layout that packs the points inside the distribution envelope
+rather than overplotting. `makeBeeswarmDemo()` returns a single-feature object
+with 500 observations in each of five groups (2,500 points); `points = "sina"`
+keeps it legible.
+
+```{r beeswarm}
+bse <- makeBeeswarmDemo(n_per_group = 500)
+cxboxplot(bse, feature = "Expression", group = "Group", color = "Group",
+    points = "sina", showLegend = FALSE,
+    title = "Beeswarm overlay with 2,500 points")
 ```
 
 # Session info

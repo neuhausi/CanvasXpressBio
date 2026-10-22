@@ -12,7 +12,7 @@
 #' @name CanvasXpressBio-package
 #' @keywords internal
 #' @importFrom methods setGeneric setMethod is
-#' @importFrom stats var
+#' @importFrom stats var rnorm runif rexp rbinom t.test setNames
 #' @importFrom canvasXpress canvasXpress
 #' @importClassesFrom SummarizedExperiment SummarizedExperiment
 "_PACKAGE"
@@ -288,6 +288,10 @@ cxvolcano <- function(x, logfc = "log2FoldChange", pval = "padj",
 #'   status (`1`/`TRUE` = event, `0`/`FALSE` = censored).
 #' @param group Optional column name used to stratify and colour the curves
 #'   (for example a treatment arm or cohort). `NULL` draws a single curve.
+#' @param tooltip Optional character vector of extra `colData` column names to
+#'   carry with each subject, so hovering a step or a censored observation
+#'   shows that subject's metadata (for example age, sex or disease stage).
+#'   `NULL` (the default) carries only the grouping column.
 #' @param ... Additional CanvasXpress configuration passed to
 #'   [canvasXpress::canvasXpress()].
 #'
@@ -303,13 +307,13 @@ cxvolcano <- function(x, logfc = "log2FoldChange", pval = "padj",
 #' @importFrom SummarizedExperiment colData
 #' @export
 cxsurvival <- function(object, time = "time", status = "status",
-    group = NULL, ...) {
+    group = NULL, tooltip = NULL, ...) {
     cd <- if (methods::is(object, "SummarizedExperiment")) {
         as.data.frame(SummarizedExperiment::colData(object))
     } else {
         as.data.frame(object)
     }
-    needed <- c(time, status, group)
+    needed <- c(time, status, group, tooltip)
     if (!all(needed %in% colnames(cd))) {
         missing <- setdiff(needed, colnames(cd))
         stop("Columns ", paste(sQuote(missing), collapse = ", "),
@@ -327,14 +331,19 @@ cxsurvival <- function(object, time = "time", status = "status",
         row.names = subjects,
         check.names = FALSE))
 
+    # Carry the grouping column and any requested tooltip columns as per-subject
+    # annotations: CanvasXpress shows them in the hover tooltip for each step /
+    # censored point, and the grouping column also colours the curves.
+    annot_cols <- unique(c(group, tooltip))
     group_args <- list()
-    if (!is.null(group)) {
+    if (length(annot_cols)) {
         var_annot <- data.frame(
             row.names = subjects,
             check.names = FALSE,
             stringsAsFactors = FALSE)
-        var_annot[[group]] <- as.character(cd[[group]])
-        group_args <- list(varAnnot = var_annot, colorBy = group)
+        for (col in annot_cols) var_annot[[col]] <- as.character(cd[[col]])
+        group_args <- list(varAnnot = var_annot)
+        if (!is.null(group)) group_args$colorBy <- group
     }
 
     do.call(canvasXpress::canvasXpress, c(
@@ -371,6 +380,11 @@ cxsurvival <- function(object, time = "time", status = "status",
 #'   measurements are joined by a line.
 #' @param color Optional `colData` column used to colour the points and
 #'   connecting lines.
+#' @param points How the individual observations are drawn over the boxes:
+#'   `"all"` (the default) places every point, `"sina"` packs them into a
+#'   beeswarm that stays legible with many points, `"jitter"` spreads them
+#'   randomly, and `"none"` draws boxes only. The beeswarm and jitter layouts
+#'   scale to hundreds or thousands of points without overplotting.
 #' @param assay Assay to read, given as a name or index. Defaults to the first.
 #' @param ... Additional CanvasXpress configuration passed to
 #'   [canvasXpress::canvasXpress()].
@@ -390,7 +404,9 @@ cxsurvival <- function(object, time = "time", status = "status",
 #' @importFrom SummarizedExperiment assay colData
 #' @export
 cxboxplot <- function(object, feature, group, segregate = NULL,
-    connect = NULL, color = NULL, assay = 1L, ...) {
+    connect = NULL, color = NULL, points = c("all", "sina", "jitter", "none"),
+    assay = 1L, ...) {
+    points <- match.arg(points)
     if (!methods::is(object, "SummarizedExperiment")) {
         stop("'object' must be a SummarizedExperiment.", call. = FALSE)
     }
@@ -424,8 +440,19 @@ cxboxplot <- function(object, feature, group, segregate = NULL,
         graphType = "Boxplot",
         graphOrientation = "vertical",
         groupingFactors = list(group),
-        showBoxplotOriginalData = TRUE,
         xAxisTitle = feature)
+    # Point overlay style. "sina" packs the observations into a beeswarm that
+    # stays readable at scale; "jitter" spreads them randomly; "all" places
+    # every point; "none" leaves the boxes bare.
+    if (points == "sina") {
+        box_args$showBoxplotOriginalData <- TRUE
+        box_args$sina <- TRUE
+    } else if (points == "jitter") {
+        box_args$showBoxplotOriginalData <- TRUE
+        box_args$jitter <- TRUE
+    } else if (points == "all") {
+        box_args$showBoxplotOriginalData <- TRUE
+    }
     if (!is.null(segregate)) box_args$segregateSamplesBy <- list(segregate)
     if (!is.null(connect)) {
         box_args$connectBy <- connect
@@ -438,4 +465,159 @@ cxboxplot <- function(object, feature, group, segregate = NULL,
         list(data = mat, smpAnnot = smp_annot),
         box_args,
         list(...)))
+}
+
+
+#' Build the demonstration SummarizedExperiment used in the vignette
+#'
+#' Assembles a small, self-contained `SummarizedExperiment` so the vignette can
+#' show every figure from one object with a single function call instead of an
+#' inline data-construction block. The study follows 24 patients in two cohorts,
+#' each measured at baseline and at week 12 over a panel of twelve marker genes.
+#' `colData` records the cohort, time point, subject, a follow-up time with an
+#' event indicator, and the direction of each subject's biomarker change;
+#' `rowData` records whether each gene is an up- or down-regulated marker.
+#'
+#' The derived analyses that the other figures need are attached to the object's
+#' [S4Vectors::metadata()] so the vignette needs no further wrangling:
+#' `deResults` is a differential-expression table (the twelve markers among a
+#' synthetic genome-wide background) for [cxvolcano()], and `albPaired` holds the
+#' per-cohort paired t-test p-values for the `ALB` marker shown by [cxboxplot()].
+#'
+#' @return A [SummarizedExperiment::SummarizedExperiment] with `deResults` and
+#'   `albPaired` in its `metadata()`.
+#'
+#' @examples
+#' se <- makeDemoSE()
+#' se
+#' S4Vectors::metadata(se)$albPaired
+#'
+#' @importFrom SummarizedExperiment SummarizedExperiment assay colData rowData
+#' @export
+makeDemoSE <- function() {
+    set.seed(1)
+
+    up_genes   <- c("IL6", "CXCL8", "MMP9", "TNF", "CCL2", "VEGFA")
+    down_genes <- c("ALB", "CDH1", "FOXO1", "PPARG", "ADIPOQ", "LEP")
+    genes      <- c(up_genes, down_genes)
+
+    patients   <- c(sprintf("PA%02d", 1:12), sprintf("PB%02d", 1:12))
+    cohort     <- rep(c("Cohort A", "Cohort B"), each = 12)
+    names(cohort) <- patients
+
+    # Sample table: each patient measured at Baseline and Week 12.
+    coldata <- data.frame(
+        Patient   = rep(patients, each = 2),
+        Condition = rep(c("Baseline", "Week 12"), times = length(patients)),
+        stringsAsFactors = FALSE)
+    coldata$Cohort <- cohort[coldata$Patient]
+    rownames(coldata) <- paste(coldata$Patient,
+        ifelse(coldata$Condition == "Baseline", "BL", "W12"),
+        sep = "_")
+
+    # Expression: baseline around 8; at week 12 the up genes rise and the down
+    # genes fall. Cohort A responds consistently; cohort B is heterogeneous, so
+    # the biomarker moves both ways there.
+    baseline <- matrix(rnorm(length(genes) * length(patients), 8, 0.8),
+        nrow = length(genes), dimnames = list(genes, patients))
+    effect   <- ifelse(genes %in% up_genes, 1.6, -1.6)
+    strength <- setNames(rep(1.0, length(patients)), patients)
+    strength[cohort == "Cohort B"] <-
+        runif(sum(cohort == "Cohort B"), -0.7, 0.8)
+
+    expr <- matrix(0, nrow = length(genes), ncol = nrow(coldata),
+        dimnames = list(genes, rownames(coldata)))
+    for (j in seq_len(nrow(coldata))) {
+        p <- coldata$Patient[j]
+        delta <- if (coldata$Condition[j] == "Week 12")
+            effect * strength[[p]] + rnorm(length(genes), 0, 0.4) else 0
+        expr[, j] <- baseline[, p] + delta
+    }
+
+    # Per-patient survival (cohort A does better) and the direction of the ALB
+    # change from baseline to week 12 (ALB is the biomarker in the boxplot).
+    alb_bl  <- expr["ALB", coldata$Condition == "Baseline"]
+    alb_w12 <- expr["ALB", coldata$Condition == "Week 12"]
+    updown  <- ifelse(alb_w12 >= alb_bl, "up", "down")
+    surv_time <- round(ifelse(cohort == "Cohort A",
+        rexp(length(patients), 1 / 28),
+        rexp(length(patients), 1 / 16)) + 2)
+    surv_status <- rbinom(length(patients), 1,
+        ifelse(cohort == "Cohort A", .5, .75))
+
+    coldata$Time   <- surv_time[match(coldata$Patient, patients)]
+    coldata$Status <- surv_status[match(coldata$Patient, patients)]
+    coldata$updown <- updown[match(coldata$Patient, patients)]
+
+    se <- SummarizedExperiment::SummarizedExperiment(
+        assays  = list(expr = expr),
+        colData = S4Vectors::DataFrame(coldata),
+        rowData = S4Vectors::DataFrame(
+            Direction = ifelse(genes %in% up_genes, "Up", "Down"),
+            row.names = genes))
+
+    # Differential-expression table for the volcano: the observed marker effects
+    # placed among a synthetic genome-wide background.
+    marker_fc <- rowMeans(expr[, coldata$Condition == "Week 12"]) -
+        rowMeans(expr[, coldata$Condition == "Baseline"])
+    marker_p  <- 10^(-abs(marker_fc) * runif(length(genes), 2.5, 3.5))
+    n_bg  <- 1988
+    bg_fc <- rnorm(n_bg, 0, 0.45)
+    bg_p  <- pmin(10^(-(abs(bg_fc) * runif(n_bg, 1.0, 3.0))), 1)
+    de <- data.frame(
+        log2FoldChange = c(marker_fc, bg_fc),
+        padj           = c(marker_p, bg_p),
+        row.names      = c(genes, paste0("bg", seq_len(n_bg))))
+
+    # Per-cohort paired t-test p-values for ALB (shown on the boxplot panels).
+    pA <- t.test(alb_w12[cohort == "Cohort A"], alb_bl[cohort == "Cohort A"],
+        paired = TRUE)$p.value
+    pB <- t.test(alb_w12[cohort == "Cohort B"], alb_bl[cohort == "Cohort B"],
+        paired = TRUE)$p.value
+
+    S4Vectors::metadata(se) <- list(
+        deResults = de,
+        albPaired = c("Cohort A" = pA, "Cohort B" = pB))
+    se
+}
+
+
+#' Build a dense single-feature SummarizedExperiment for a beeswarm demo
+#'
+#' Returns a `SummarizedExperiment` with one feature measured across several
+#' groups and many observations per group, so a boxplot with a sina / beeswarm
+#' overlay ([cxboxplot()] with `points = "sina"`) can be shown to stay legible
+#' at scale rather than collapsing into an overplotted mass.
+#'
+#' @param n_per_group Integer; observations in each group. Defaults to `500`.
+#'
+#' @return A [SummarizedExperiment::SummarizedExperiment] with a single
+#'   `"Expression"` feature and a `Group` column in its `colData`.
+#'
+#' @examples
+#' bse <- makeBeeswarmDemo(n_per_group = 100)
+#' cxboxplot(bse, feature = "Expression", group = "Group", points = "sina")
+#'
+#' @importFrom SummarizedExperiment SummarizedExperiment
+#' @export
+makeBeeswarmDemo <- function(n_per_group = 500) {
+    set.seed(2)
+    groups  <- c("Ctrl", "Low dose", "Mid dose", "High dose", "Combo")
+    centers <- c(8, 8.6, 9.4, 10.2, 9.0)
+
+    samples <- character(0)
+    values  <- numeric(0)
+    grp     <- character(0)
+    for (gi in seq_along(groups)) {
+        ids <- sprintf("%s_%04d", gsub(" ", "", groups[gi]),
+            seq_len(n_per_group))
+        samples <- c(samples, ids)
+        grp     <- c(grp, rep(groups[gi], n_per_group))
+        values  <- c(values, rnorm(n_per_group, centers[gi], 0.9))
+    }
+
+    SummarizedExperiment::SummarizedExperiment(
+        assays  = list(expr = matrix(values, nrow = 1,
+            dimnames = list("Expression", samples))),
+        colData = S4Vectors::DataFrame(Group = grp, row.names = samples))
 }

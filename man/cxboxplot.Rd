@@ -11,6 +11,7 @@ cxboxplot(
   segregate = NULL,
   connect = NULL,
   color = NULL,
+  points = c("all", "sina", "jitter", "none"),
   assay = 1L,
   ...
 )
@@ -31,6 +32,12 @@ measurements are joined by a line.}
 
 \item{color}{Optional `colData` column used to colour the points and
 connecting lines.}
+
+\item{points}{How the individual observations are drawn over the boxes:
+`"all"` (the default) places every point, `"sina"` packs them into a
+beeswarm that stays legible with many points, `"jitter"` spreads them
+randomly, and `"none"` draws boxes only. The beeswarm and jitter layouts
+scale to hundreds or thousands of points without overplotting.}
 
 \item{assay}{Assay to read, given as a name or index. Defaults to the first.}
 

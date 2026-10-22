@@ -1,6 +1,6 @@
 Package: CanvasXpressBio
 Title: CanvasXpress Visualizations for Bioconductor Data Structures
-Version: 0.99.4
+Version: 0.99.5
 Authors@R:
     person("Isaac", "Neuhaus", email = "imnphd@gmail.com",
            role = c("aut", "cre"),
@@ -22,10 +22,10 @@ Imports:
     methods,
     stats,
     canvasXpress (>= 1.70.3),
-    SummarizedExperiment
+    SummarizedExperiment,
+    S4Vectors
 Suggests:
     SingleCellExperiment,
-    S4Vectors,
     airway,
     BiocStyle,
     knitr,
