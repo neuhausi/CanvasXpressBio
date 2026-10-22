@@ -2,3 +2,7 @@
 ^\.gitignore$
 ^.*\.Rproj$
 ^\.Rproj\.user$
+^.*\.BiocCheck$
+^.*\.Rcheck$
+^.*\.tar\.gz$
+^\.github$

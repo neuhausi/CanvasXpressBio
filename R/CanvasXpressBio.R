@@ -481,8 +481,10 @@ cxboxplot <- function(object, feature, group, segregate = NULL,
 #' The derived analyses that the other figures need are attached to the object's
 #' [S4Vectors::metadata()] so the vignette needs no further wrangling:
 #' `deResults` is a differential-expression table (the twelve markers among a
-#' synthetic genome-wide background) for [cxvolcano()], and `albPaired` holds the
-#' per-cohort paired t-test p-values for the `ALB` marker shown by [cxboxplot()].
+#' synthetic genome-wide background) for [cxvolcano()], and `albPaired` holds
+#' the per-cohort paired t-test p-values for the `ALB` marker shown by
+#' [cxboxplot()]. The random draws are seeded reproducibly with
+#' [withr::with_seed()], so the object is identical on every call.
 #'
 #' @return A [SummarizedExperiment::SummarizedExperiment] with `deResults` and
 #'   `albPaired` in its `metadata()`.
@@ -495,13 +497,33 @@ cxboxplot <- function(object, feature, group, segregate = NULL,
 #' @importFrom SummarizedExperiment SummarizedExperiment assay colData rowData
 #' @export
 makeDemoSE <- function() {
-    set.seed(1)
+    d <- withr::with_seed(1, .demoData())
 
+    se <- SummarizedExperiment::SummarizedExperiment(
+        assays  = list(expr = d$expr),
+        colData = S4Vectors::DataFrame(d$coldata),
+        rowData = S4Vectors::DataFrame(
+            Direction = ifelse(rownames(d$expr) %in% d$up_genes, "Up", "Down"),
+            row.names = rownames(d$expr)))
+
+    S4Vectors::metadata(se) <- list(
+        deResults = d$de,
+        albPaired = c("Cohort A" = d$pA, "Cohort B" = d$pB))
+    se
+}
+
+
+# Draw the demonstration data (expression matrix, sample table, DE table and
+# the per-cohort paired p-values). Kept separate so [makeDemoSE()] can run it
+# under a fixed seed via withr::with_seed() rather than calling set.seed() in
+# package code.
+.demoData <- function() {
     up_genes   <- c("IL6", "CXCL8", "MMP9", "TNF", "CCL2", "VEGFA")
     down_genes <- c("ALB", "CDH1", "FOXO1", "PPARG", "ADIPOQ", "LEP")
     genes      <- c(up_genes, down_genes)
 
-    patients   <- c(sprintf("PA%02d", 1:12), sprintf("PB%02d", 1:12))
+    patients   <- c(sprintf("PA%02d", seq_len(12)),
+        sprintf("PB%02d", seq_len(12)))
     cohort     <- rep(c("Cohort A", "Cohort B"), each = 12)
     names(cohort) <- patients
 
@@ -549,13 +571,6 @@ makeDemoSE <- function() {
     coldata$Status <- surv_status[match(coldata$Patient, patients)]
     coldata$updown <- updown[match(coldata$Patient, patients)]
 
-    se <- SummarizedExperiment::SummarizedExperiment(
-        assays  = list(expr = expr),
-        colData = S4Vectors::DataFrame(coldata),
-        rowData = S4Vectors::DataFrame(
-            Direction = ifelse(genes %in% up_genes, "Up", "Down"),
-            row.names = genes))
-
     # Differential-expression table for the volcano: the observed marker effects
     # placed among a synthetic genome-wide background.
     marker_fc <- rowMeans(expr[, coldata$Condition == "Week 12"]) -
@@ -575,10 +590,8 @@ makeDemoSE <- function() {
     pB <- t.test(alb_w12[cohort == "Cohort B"], alb_bl[cohort == "Cohort B"],
         paired = TRUE)$p.value
 
-    S4Vectors::metadata(se) <- list(
-        deResults = de,
-        albPaired = c("Cohort A" = pA, "Cohort B" = pB))
-    se
+    list(expr = expr, coldata = coldata, up_genes = up_genes,
+        de = de, pA = pA, pB = pB)
 }
 
 
@@ -601,7 +614,6 @@ makeDemoSE <- function() {
 #' @importFrom SummarizedExperiment SummarizedExperiment
 #' @export
 makeBeeswarmDemo <- function(n_per_group = 500) {
-    set.seed(2)
     groups  <- c("Ctrl", "Low dose", "Mid dose", "High dose", "Combo")
     centers <- c(8, 8.6, 9.4, 10.2, 9.0)
 
@@ -613,7 +625,10 @@ makeBeeswarmDemo <- function(n_per_group = 500) {
             seq_len(n_per_group))
         samples <- c(samples, ids)
         grp     <- c(grp, rep(groups[gi], n_per_group))
-        values  <- c(values, rnorm(n_per_group, centers[gi], 0.9))
+        # Seed per group so the result is reproducible without set.seed() in
+        # package code (withr restores the RNG state afterwards).
+        values  <- c(values,
+            withr::with_seed(gi, rnorm(n_per_group, centers[gi], 0.9)))
     }
 
     SummarizedExperiment::SummarizedExperiment(

@@ -23,8 +23,10 @@ event indicator, and the direction of each subject's biomarker change;
 The derived analyses that the other figures need are attached to the object's
 [S4Vectors::metadata()] so the vignette needs no further wrangling:
 `deResults` is a differential-expression table (the twelve markers among a
-synthetic genome-wide background) for [cxvolcano()], and `albPaired` holds the
-per-cohort paired t-test p-values for the `ALB` marker shown by [cxboxplot()].
+synthetic genome-wide background) for [cxvolcano()], and `albPaired` holds
+the per-cohort paired t-test p-values for the `ALB` marker shown by
+[cxboxplot()]. The random draws are seeded reproducibly with
+[withr::with_seed()], so the object is identical on every call.
 }
 \examples{
 se <- makeDemoSE()

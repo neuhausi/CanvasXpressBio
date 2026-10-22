@@ -1,3 +1,9 @@
+# CanvasXpressBio 0.99.6
+
+* Seed the demonstration-data helpers with `withr::with_seed()` instead of
+  `set.seed()` so there is no `set.seed()` call in package code (clears the
+  BiocCheck warning), and tidy the related notes.
+
 # CanvasXpressBio 0.99.5
 
 * New `makeDemoSE()` builds the vignette's demonstration `SummarizedExperiment`
